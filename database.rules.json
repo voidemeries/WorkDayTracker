@@ -21,10 +21,7 @@
     },
     "officeSchedules": {
       ".read": "auth != null",
-      "$scheduleId": {
-        ".write": "(!data.exists() && newData.child('userId').val() === auth.uid) || (data.exists() && data.child('userId').val() === auth.uid) || !newData.exists()",
-        ".validate": "newData.hasChildren(['id', 'roomId', 'userId', 'date', 'status', 'createdAt'])"
-      }
+      ".write": "auth != null"
     },
     "changeRequests": {
       ".read": "auth != null",
