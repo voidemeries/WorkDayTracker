@@ -214,7 +214,7 @@ export default function CalendarPage() {
       id: requestId,
       roomId: selectedRoomId,
       userId: currentUser.id,
-      originalDate: selectedDate ? format(selectedDate, 'yyyy-MM-dd') : null,
+      originalDate: originalScheduleDate ? format(originalScheduleDate, 'yyyy-MM-dd') : null,
       newDate: format(newScheduleDate, 'yyyy-MM-dd'),
       reason: reason || null,
       status: 'pending',
