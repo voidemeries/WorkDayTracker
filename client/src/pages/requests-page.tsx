@@ -165,13 +165,6 @@ export default function RequestsPage() {
       const request = scheduleRequests.find(r => r.id === requestId);
       if (!request || !currentUser) return;
 
-      // Update the request status
-      await update(ref(database, `changeRequests/${requestId}`), {
-        status: 'approved',
-        resolvedAt: Date.now(),
-        resolvedBy: currentUser.uid
-      });
-
       if (request.newDate === null) {
         // This is a delete request - find and remove the schedule
         const schedulesRef = ref(database, 'officeSchedules');
@@ -190,20 +183,53 @@ export default function RequestsPage() {
           }
         }
 
+        // Update the request status after deleting
+        await update(ref(database, `changeRequests/${requestId}`), {
+          status: 'approved',
+          resolvedAt: Date.now(),
+          resolvedBy: currentUser.id
+        });
+
         toast({
           title: "Approved",
           description: "Office day has been deleted",
         });
       } else {
-        // This is a schedule change - create or update the schedule
-        const scheduleId = push(ref(database, 'officeSchedules')).key;
-        await set(ref(database, `officeSchedules/${scheduleId}`), {
-          id: scheduleId,
+        // This is a schedule change - remove old schedule if it exists, then create new one
+        const schedulesRef = ref(database, 'officeSchedules');
+        const snapshot = await get(schedulesRef);
+        
+        if (request.originalDate && snapshot.exists()) {
+          // Find and remove the old schedule
+          const schedules = snapshot.val();
+          const oldSchedule = Object.entries(schedules).find(
+            ([_, schedule]: any) => 
+              schedule.userId === request.userId && 
+              schedule.roomId === request.roomId && 
+              schedule.date === request.originalDate
+          );
+
+          if (oldSchedule) {
+            await remove(ref(database, `officeSchedules/${oldSchedule[0]}`));
+          }
+        }
+
+        // Create the new schedule
+        const newScheduleRef = push(ref(database, 'officeSchedules'));
+        await set(newScheduleRef, {
+          id: newScheduleRef.key,
           roomId: request.roomId,
           userId: request.userId,
           date: request.newDate,
           status: 'office',
           createdAt: Date.now()
+        });
+
+        // Update the request status after creating new schedule
+        await update(ref(database, `changeRequests/${requestId}`), {
+          status: 'approved',
+          resolvedAt: Date.now(),
+          resolvedBy: currentUser.id
         });
 
         toast({
@@ -212,6 +238,7 @@ export default function RequestsPage() {
         });
       }
     } catch (error) {
+      console.error("Error approving schedule change:", error);
       toast({
         variant: "destructive",
         title: "Error",
