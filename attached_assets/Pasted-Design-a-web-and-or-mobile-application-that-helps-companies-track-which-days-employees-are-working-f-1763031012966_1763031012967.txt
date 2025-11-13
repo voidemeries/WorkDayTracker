@@ -1,0 +1,85 @@
+Design a web and/or mobile application that helps companies track which days employees are working from the office, using a room-based structure and Firebase Authentication.
+
+High-level concept
+	•	The app should allow users to sign up and log in using Firebase Authentication (email/password, Google, etc.).
+	•	After logging in, a user can either:
+	•	Create a room (e.g., one room per company, team, or office), or
+	•	Join an existing room via an invite link or room code.
+	•	The user who creates the room becomes the room owner / admin.
+	•	The app’s main purpose is to track who is in the office on which days, and to manage office day changes with manager approval.
+
+Roles & permissions
+	1.	Room Admin (Owner / Manager)
+	•	Created the room or has been promoted to admin.
+	•	Can view all members’ office schedules in a calendar view.
+	•	Can approve or reject:
+	•	Join requests to the room.
+	•	Office day change requests made by employees.
+	•	Can configure room settings (e.g., office days, capacity limits per day, etc.).
+	2.	Regular User (Employee)
+	•	Can request to join a room.
+	•	Once approved, can:
+	•	See their own calendar showing which days they are planned to be in the office.
+	•	Submit requests to change office days (for example, switching from Tuesday to Thursday).
+	•	Their requested changes do not affect the room calendar until approved by an admin.
+
+Core features
+	1.	Authentication & Onboarding
+	•	Use Firebase Authentication for sign up / login.
+	•	Basic user profile: name, email, role (employee/manager – role mainly controlled by room admins).
+	2.	Room Management
+	•	Create room (auto-assign creator as admin).
+	•	Generate join code or invite link for the room.
+	•	Users can:
+	•	Enter a room code to request access.
+	•	Admin sees a pending requests list and can approve or reject join requests.
+	3.	Calendar & Office Attendance
+	•	Each room has a shared calendar view.
+	•	For each day, show:
+	•	Which employees are scheduled to be in the office.
+	•	Each user has a personal schedule, synced with the room calendar after approvals.
+	•	Option to filter by:
+	•	Specific user
+	•	Team (optional future feature)
+	•	Date range (this week, this month, etc.).
+	4.	Office Day Change Requests
+	•	Employees can propose:
+	•	Changing an office day (e.g. change from 2025-11-15 to 2025-11-16).
+	•	Adding/removing an office day (depending on rules).
+	•	Each change is created as a request object with:
+	•	User
+	•	Original day(s)
+	•	New day(s)
+	•	Reason (optional text)
+	•	Status: PENDING, APPROVED, REJECTED
+	•	Admins see all pending requests in a request management screen.
+	•	When an admin approves a request:
+	•	The shared room calendar and the user’s personal calendar are updated.
+	•	When rejected:
+	•	No calendar changes are made; the user is notified.
+	5.	Notifications
+	•	Basic in-app notifications:
+	•	For admins: when there is a new join request or office day change request.
+	•	For employees: when a manager approves or rejects their request.
+	•	(Optional) Use Firebase Cloud Messaging for push notifications.
+	6.	Data model (example-level, not strict)
+	•	users: id, name, email, createdAt.
+	•	rooms: id, name, createdBy, createdAt.
+	•	roomMembers: roomId, userId, role (admin / member), status (active, pending).
+	•	officeSchedules: roomId, userId, date, status (office, remote).
+	•	changeRequests: id, roomId, userId, originalDate(s), newDate(s), reason, status, createdAt, resolvedAt, resolvedBy.
+
+Technical requirements
+	•	Use Firebase Authentication for login/registration.
+	•	Use Firebase Realtime Database for:
+	•	Rooms
+	•	Members
+	•	Calendars
+	•	Requests
+	•	The UI should be simple and intuitive:
+	•	Dashboard with upcoming office days.
+	•	Calendar view per room.
+	•	Separate section for Requests (for admins).
+	•	Write clean, modular code and make it easy to extend with features like:
+	•	Limiting the number of people in the office per day.
+	•	Exporting attendance data.
