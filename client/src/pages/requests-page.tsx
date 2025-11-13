@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
-import { ref, get, onValue, update, push, set } from "firebase/database";
+import { ref, get, onValue, update, push, set, remove } from "firebase/database";
 import { database } from "@/lib/firebase";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { Clock, Check, X, Calendar, ArrowRight } from "lucide-react";
-import { format } from "date-fns";
+import { format, parseISO } from "date-fns";
 import type { Room, RoomMember, ChangeRequest, User, OfficeSchedule } from "@shared/schema";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 
@@ -73,7 +73,7 @@ export default function RequestsPage() {
               get(ref(database, `users/${member.userId}`)),
               get(ref(database, `rooms/${member.roomId}`))
             ]);
-            
+
             return {
               ...member,
               id,
@@ -112,7 +112,7 @@ export default function RequestsPage() {
               get(ref(database, `users/${req.userId}`)),
               get(ref(database, `rooms/${req.roomId}`))
             ]);
-            
+
             return {
               ...req,
               id,
@@ -160,46 +160,57 @@ export default function RequestsPage() {
     }
   };
 
-  const handleApproveScheduleRequest = async (request: ChangeRequest & { user: User, room: Room }) => {
+  const handleApproveScheduleChange = async (requestId: string) => {
     try {
-      await update(ref(database, `changeRequests/${request.id}`), {
+      const request = scheduleRequests.find(r => r.id === requestId);
+      if (!request || !currentUser) return;
+
+      // Update the request status
+      await update(ref(database, `changeRequests/${requestId}`), {
         status: 'approved',
         resolvedAt: Date.now(),
-        resolvedBy: currentUser!.id,
+        resolvedBy: currentUser.uid
       });
 
-      if (request.originalDate) {
-        const schedulesSnapshot = await get(ref(database, 'officeSchedules'));
-        if (schedulesSnapshot.exists()) {
-          const schedules = schedulesSnapshot.val();
-          const oldScheduleEntry = Object.entries(schedules).find(
-            ([_, s]: any) => 
-              s.userId === request.userId && 
-              s.roomId === request.roomId && 
-              s.date === request.originalDate
+      if (request.newDate === null) {
+        // This is a delete request - find and remove the schedule
+        const schedulesRef = ref(database, 'officeSchedules');
+        const snapshot = await get(schedulesRef);
+        if (snapshot.exists()) {
+          const schedules = snapshot.val();
+          const scheduleToDelete = Object.entries(schedules).find(
+            ([_, schedule]: any) => 
+              schedule.userId === request.userId && 
+              schedule.roomId === request.roomId && 
+              schedule.date === request.originalDate
           );
-          
-          if (oldScheduleEntry) {
-            await set(ref(database, `officeSchedules/${oldScheduleEntry[0]}`), null);
+
+          if (scheduleToDelete) {
+            await remove(ref(database, `officeSchedules/${scheduleToDelete[0]}`));
           }
         }
+
+        toast({
+          title: "Approved",
+          description: "Office day has been deleted",
+        });
+      } else {
+        // This is a schedule change - create or update the schedule
+        const scheduleId = push(ref(database, 'officeSchedules')).key;
+        await set(ref(database, `officeSchedules/${scheduleId}`), {
+          id: scheduleId,
+          roomId: request.roomId,
+          userId: request.userId,
+          date: request.newDate,
+          status: 'office',
+          createdAt: Date.now()
+        });
+
+        toast({
+          title: "Approved",
+          description: "Schedule change has been approved",
+        });
       }
-
-      const newScheduleRef = push(ref(database, 'officeSchedules'));
-      const newSchedule: OfficeSchedule = {
-        id: newScheduleRef.key!,
-        roomId: request.roomId,
-        userId: request.userId,
-        date: request.newDate,
-        status: 'office',
-        createdAt: Date.now(),
-      };
-      await set(newScheduleRef, newSchedule);
-
-      toast({
-        title: "Approved",
-        description: "Schedule change has been approved",
-      });
     } catch (error) {
       toast({
         variant: "destructive",
@@ -320,13 +331,21 @@ export default function RequestsPage() {
                   <div>
                     <p className="text-xs text-muted-foreground mb-2">Schedule Change Request</p>
                     <div className="flex items-center gap-3 text-sm">
-                      {request.originalDate ? (
+                      {request.newDate === null ? (
+                        <div className="flex-1">
+                          <p className="text-xs text-muted-foreground mb-1">Delete Office Day:</p>
+                          <div className="flex items-center gap-2 px-3 py-2 bg-destructive/10 rounded-md border border-destructive/20">
+                            <Calendar className="w-4 h-4 text-destructive" />
+                            <span className="font-medium">{format(parseISO(request.originalDate), 'MMM d, yyyy')}</span>
+                          </div>
+                        </div>
+                      ) : request.originalDate ? (
                         <>
                           <div className="flex-1">
                             <p className="text-xs text-muted-foreground mb-1">Change FROM:</p>
                             <div className="flex items-center gap-2 px-3 py-2 bg-muted rounded-md">
                               <Calendar className="w-4 h-4 text-muted-foreground" />
-                              <span>{format(new Date(request.originalDate), 'MMM d, yyyy')}</span>
+                              <span>{format(parseISO(request.originalDate), 'MMM d, yyyy')}</span>
                             </div>
                           </div>
                           <ArrowRight className="w-5 h-5 text-muted-foreground mt-5" />
@@ -334,7 +353,7 @@ export default function RequestsPage() {
                             <p className="text-xs text-muted-foreground mb-1">Change TO:</p>
                             <div className="flex items-center gap-2 px-3 py-2 bg-primary/10 rounded-md border border-primary/20">
                               <Calendar className="w-4 h-4 text-primary" />
-                              <span className="font-medium">{format(new Date(request.newDate), 'MMM d, yyyy')}</span>
+                              <span className="font-medium">{format(parseISO(request.newDate), 'MMM d, yyyy')}</span>
                             </div>
                           </div>
                         </>
@@ -343,7 +362,7 @@ export default function RequestsPage() {
                           <p className="text-xs text-muted-foreground mb-1">Add New Office Day:</p>
                           <div className="flex items-center gap-2 px-3 py-2 bg-primary/10 rounded-md border border-primary/20">
                             <Calendar className="w-4 h-4 text-primary" />
-                            <span className="font-medium">{format(new Date(request.newDate), 'MMM d, yyyy')}</span>
+                            <span className="font-medium">{format(parseISO(request.newDate), 'MMM d, yyyy')}</span>
                           </div>
                         </div>
                       )}
@@ -361,7 +380,7 @@ export default function RequestsPage() {
                     <Button
                       className="flex-1"
                       data-testid={`button-approve-schedule-${request.id}`}
-                      onClick={() => handleApproveScheduleRequest(request)}
+                      onClick={() => handleApproveScheduleChange(request.id)}
                     >
                       <Check className="w-4 h-4 mr-2" />
                       Approve

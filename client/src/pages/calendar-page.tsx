@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
-import { ref, get, onValue, push, set } from "firebase/database";
+import { ref, get, onValue, push, set, remove } from "firebase/database";
 import { database } from "@/lib/firebase";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -12,10 +12,11 @@ import { Textarea } from "@/components/ui/textarea";
 import { Calendar } from "@/components/ui/calendar";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
-import { ChevronLeft, ChevronRight, Calendar as CalendarIcon, Users, Plus, UserPlus } from "lucide-react";
+import { ChevronLeft, ChevronRight, Calendar as CalendarIcon, Users, Plus, UserPlus, Trash2 } from "lucide-react";
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, startOfWeek, endOfWeek, addMonths, subMonths } from "date-fns";
 import type { Room, RoomMember, OfficeSchedule, User, ChangeRequest } from "@shared/schema";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 
 export default function CalendarPage() {
   const { currentUser } = useAuth();
@@ -33,6 +34,9 @@ export default function CalendarPage() {
   const [roomMembers, setRoomMembers] = useState<(RoomMember & { user: User })[]>([]);
   const [selectedMembers, setSelectedMembers] = useState<string[]>([]);
   const [assignDates, setAssignDates] = useState<Date[]>([]);
+  const [deleteScheduleId, setDeleteScheduleId] = useState<string | null>(null);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+
 
   useEffect(() => {
     if (!currentUser) return;
@@ -126,7 +130,7 @@ export default function CalendarPage() {
 
     try {
       const schedulesRef = ref(database, 'officeSchedules');
-      
+
       for (const memberId of selectedMembers) {
         const member = roomMembers.find(m => m.id === memberId);
         if (!member) continue;
@@ -199,6 +203,99 @@ export default function CalendarPage() {
         title: "Error",
         description: "Could not submit request",
       });
+    }
+  };
+
+  const handleSubmitChange = async () => {
+    if (!newScheduleDate || !selectedRoomId || !currentUser) return;
+
+    const requestId = push(ref(database, 'changeRequests')).key;
+    const newRequest = {
+      id: requestId,
+      roomId: selectedRoomId,
+      userId: currentUser.id,
+      originalDate: selectedDate ? format(selectedDate, 'yyyy-MM-dd') : null,
+      newDate: format(newScheduleDate, 'yyyy-MM-dd'),
+      reason: reason || null,
+      status: 'pending',
+      createdAt: Date.now(),
+      resolvedAt: null,
+      resolvedBy: null
+    };
+
+    try {
+      await set(ref(database, `changeRequests/${requestId}`), newRequest);
+      toast({
+        title: "Request Submitted",
+        description: "Your schedule change request has been sent to the admin for approval",
+      });
+      setRequestDialogOpen(false);
+      setNewScheduleDate(undefined);
+      setReason('');
+    } catch (error) {
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "Could not submit request",
+      });
+    }
+  };
+
+  const handleDeleteSchedule = async (scheduleId: string, isAdmin: boolean) => {
+    if (!currentUser || !selectedRoomId) return;
+
+    const schedule = schedules.find(s => s.id === scheduleId);
+    if (!schedule) return;
+
+    if (isAdmin) {
+      // Admin can delete directly
+      try {
+        await remove(ref(database, `officeSchedules/${scheduleId}`));
+        toast({
+          title: "Deleted",
+          description: "Office day has been removed",
+        });
+        setShowDeleteDialog(false);
+        setDeleteScheduleId(null);
+      } catch (error) {
+        toast({
+          variant: "destructive",
+          title: "Error",
+          description: "Could not delete schedule",
+        });
+      }
+    } else {
+      // Regular user must request deletion
+      const requestId = push(ref(database, 'changeRequests')).key;
+      const deleteRequest = {
+        id: requestId,
+        roomId: selectedRoomId,
+        userId: currentUser.id,
+        originalDate: schedule.date,
+        newDate: null, // null indicates deletion request
+        reason: reason || 'Requested to delete office day',
+        status: 'pending',
+        createdAt: Date.now(),
+        resolvedAt: null,
+        resolvedBy: null
+      };
+
+      try {
+        await set(ref(database, `changeRequests/${requestId}`), deleteRequest);
+        toast({
+          title: "Delete Request Submitted",
+          description: "Your request to delete this office day has been sent to the admin for approval",
+        });
+        setShowDeleteDialog(false);
+        setDeleteScheduleId(null);
+        setReason('');
+      } catch (error) {
+        toast({
+          variant: "destructive",
+          title: "Error",
+          description: "Could not submit delete request",
+        });
+      }
     }
   };
 
@@ -434,25 +531,43 @@ export default function CalendarPage() {
                     </div>
                   ) : (
                     <div className="space-y-2">
-                      {daySchedules.map((schedule) => (
-                        <div 
-                          key={schedule.id} 
-                          className="flex items-center gap-2 py-2 border-b last:border-0"
-                          data-testid={`schedule-${schedule.id}`}
-                        >
-                          <Avatar className="w-8 h-8">
-                            <AvatarFallback className="text-xs">
-                              {schedule.user?.name?.substring(0, 2).toUpperCase() || 'U'}
-                            </AvatarFallback>
-                          </Avatar>
-                          <div className="flex-1">
-                            <p className="text-sm font-medium">{schedule.user?.name}</p>
-                            <Badge variant={schedule.status === 'office' ? 'default' : 'secondary'} className="text-xs mt-1">
-                              {schedule.status === 'office' ? 'In Office' : 'Remote'}
-                            </Badge>
+                      {daySchedules.map((schedule) => {
+                        const isOwnSchedule = schedule.userId === currentUser?.uid;
+                        const isRoomAdmin = userRooms.find(r => r.id === selectedRoomId)?.memberRole === 'admin';
+                        const canDelete = isOwnSchedule || isRoomAdmin;
+
+                        return (
+                          <div
+                            key={schedule.id}
+                            className="flex items-center justify-between p-2 rounded-lg bg-muted/50"
+                          >
+                            <div className="flex items-center gap-2">
+                              <div className="w-2 h-2 rounded-full bg-primary" />
+                              <span className="text-sm">
+                                {schedule.user?.name || 'Unknown User'}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs text-muted-foreground">
+                                {schedule.status === 'office' ? 'Office' : 'Remote'}
+                              </span>
+                              {canDelete && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-6 w-6 p-0"
+                                  onClick={() => {
+                                    setDeleteScheduleId(schedule.id);
+                                    setShowDeleteDialog(true);
+                                  }}
+                                >
+                                  <Trash2 className="h-3 w-3 text-destructive" />
+                                </Button>
+                              )}
+                            </div>
                           </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
 
@@ -544,7 +659,7 @@ export default function CalendarPage() {
                           />
                         </div>
                         <Button 
-                          onClick={handleRequestChange}
+                          onClick={handleSubmitChange}
                           data-testid="button-submit-request"
                           className="w-full"
                           disabled={!newScheduleDate || !originalScheduleDate}
@@ -570,6 +685,47 @@ export default function CalendarPage() {
           </Card>
         </div>
       )}
+
+        <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete Office Day</AlertDialogTitle>
+              <AlertDialogDescription>
+                {userRooms.find(r => r.id === selectedRoomId)?.memberRole === 'admin' 
+                  ? "Are you sure you want to delete this office day? This action cannot be undone."
+                  : "This will send a request to the admin to delete this office day. Please provide a reason:"}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            {userRooms.find(r => r.id === selectedRoomId)?.memberRole !== 'admin' && (
+              <div className="space-y-2">
+                <Label htmlFor="delete-reason">Reason</Label>
+                <Textarea
+                  id="delete-reason"
+                  value={reason}
+                  onChange={(e) => setReason(e.target.value)}
+                  placeholder="Why do you want to delete this office day?"
+                />
+              </div>
+            )}
+            <AlertDialogFooter>
+              <AlertDialogCancel onClick={() => {
+                setDeleteScheduleId(null);
+                setReason('');
+              }}>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={() => {
+                  if (deleteScheduleId) {
+                    const isAdmin = userRooms.find(r => r.id === selectedRoomId)?.memberRole === 'admin';
+                    handleDeleteSchedule(deleteScheduleId, isAdmin);
+                  }
+                }}
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              >
+                {userRooms.find(r => r.id === selectedRoomId)?.memberRole === 'admin' ? 'Delete' : 'Request Delete'}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
     </div>
   );
 }
