@@ -590,48 +590,81 @@ export default function CalendarPage() {
                         onClick={() => {
                           if (userScheduleForDay) {
                             setOriginalScheduleDate(new Date(userScheduleForDay.date));
+                          } else {
+                            setOriginalScheduleDate(undefined);
+                            setNewScheduleDate(selectedDate);
                           }
                         }}
                       >
                         <Plus className="w-4 h-4 mr-2" />
-                        Request Schedule Change
+                        {userScheduleForDay ? 'Request Schedule Change' : 'Request Working Day'}
                       </Button>
                     </DialogTrigger>
                     <DialogContent className="max-w-2xl">
                       <DialogHeader>
-                        <DialogTitle>Request Schedule Change</DialogTitle>
+                        <DialogTitle>
+                          {userScheduleForDay ? 'Request Schedule Change' : 'Request Working Day'}
+                        </DialogTitle>
                         <DialogDescription>
-                          Select the date you want to change and the new date you want to move to
+                          {userScheduleForDay 
+                            ? 'Select the date you want to change and the new date you want to move to'
+                            : 'Request to work from office on the selected date'
+                          }
                         </DialogDescription>
                       </DialogHeader>
                       <div className="space-y-6 pt-4">
-                        <div className="grid gap-4 md:grid-cols-2">
-                          <div className="space-y-2">
-                            <Label className="text-sm font-medium">
-                              Date to Change FROM {originalScheduleDate && '✓'}
-                            </Label>
-                            <p className="text-xs text-muted-foreground mb-2">
-                              Select the current office date you want to change
-                            </p>
-                            <Calendar
-                              mode="single"
-                              selected={originalScheduleDate}
-                              onSelect={setOriginalScheduleDate}
-                              className="rounded-md border"
-                              data-testid="calendar-original-date"
-                            />
-                            {originalScheduleDate && (
-                              <p className="text-xs text-center text-muted-foreground mt-2">
-                                Selected: {format(originalScheduleDate, 'MMM d, yyyy')}
+                        {userScheduleForDay ? (
+                          // Schedule change flow (has existing schedule)
+                          <div className="grid gap-4 md:grid-cols-2">
+                            <div className="space-y-2">
+                              <Label className="text-sm font-medium">
+                                Date to Change FROM {originalScheduleDate && '✓'}
+                              </Label>
+                              <p className="text-xs text-muted-foreground mb-2">
+                                Select the current office date you want to change
                               </p>
-                            )}
+                              <Calendar
+                                mode="single"
+                                selected={originalScheduleDate}
+                                onSelect={setOriginalScheduleDate}
+                                className="rounded-md border"
+                                data-testid="calendar-original-date"
+                              />
+                              {originalScheduleDate && (
+                                <p className="text-xs text-center text-muted-foreground mt-2">
+                                  Selected: {format(originalScheduleDate, 'MMM d, yyyy')}
+                                </p>
+                              )}
+                            </div>
+                            <div className="space-y-2">
+                              <Label className="text-sm font-medium">
+                                Date to Change TO {newScheduleDate && '✓'}
+                              </Label>
+                              <p className="text-xs text-muted-foreground mb-2">
+                                Select the new date you want to work from office
+                              </p>
+                              <Calendar
+                                mode="single"
+                                selected={newScheduleDate}
+                                onSelect={setNewScheduleDate}
+                                className="rounded-md border"
+                                data-testid="calendar-new-date"
+                              />
+                              {newScheduleDate && (
+                                <p className="text-xs text-center text-muted-foreground mt-2">
+                                  Selected: {format(newScheduleDate, 'MMM d, yyyy')}
+                                </p>
+                              )}
+                            </div>
                           </div>
+                        ) : (
+                          // Request new working day flow (no existing schedule)
                           <div className="space-y-2">
                             <Label className="text-sm font-medium">
-                              Date to Change TO {newScheduleDate && '✓'}
+                              Request Office Day {newScheduleDate && '✓'}
                             </Label>
                             <p className="text-xs text-muted-foreground mb-2">
-                              Select the new date you want to work from office
+                              Select the date you want to work from office
                             </p>
                             <Calendar
                               mode="single"
@@ -646,13 +679,13 @@ export default function CalendarPage() {
                               </p>
                             )}
                           </div>
-                        </div>
+                        )}
                         <div className="space-y-2">
                           <Label htmlFor="reason">Reason (optional)</Label>
                           <Textarea
                             id="reason"
                             data-testid="textarea-reason"
-                            placeholder="Why are you requesting this change?"
+                            placeholder={userScheduleForDay ? "Why are you requesting this change?" : "Why do you want to work from office on this date?"}
                             value={reason}
                             onChange={(e) => setReason(e.target.value)}
                             rows={3}
@@ -662,13 +695,18 @@ export default function CalendarPage() {
                           onClick={handleSubmitChange}
                           data-testid="button-submit-request"
                           className="w-full"
-                          disabled={!newScheduleDate || !originalScheduleDate}
+                          disabled={!newScheduleDate || (userScheduleForDay && !originalScheduleDate)}
                         >
-                          Submit Change Request
+                          {userScheduleForDay ? 'Submit Change Request' : 'Submit Request'}
                         </Button>
-                        {(!originalScheduleDate || !newScheduleDate) && (
+                        {userScheduleForDay && (!originalScheduleDate || !newScheduleDate) && (
                           <p className="text-xs text-center text-muted-foreground">
                             Please select both dates to submit your request
+                          </p>
+                        )}
+                        {!userScheduleForDay && !newScheduleDate && (
+                          <p className="text-xs text-center text-muted-foreground">
+                            Please select a date to submit your request
                           </p>
                         )}
                       </div>
