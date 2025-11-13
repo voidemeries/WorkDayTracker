@@ -317,25 +317,37 @@ export default function RequestsPage() {
                   </div>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  <div className="flex items-center gap-2 text-sm">
-                    {request.originalDate ? (
-                      <>
-                        <div className="flex items-center gap-2 px-3 py-2 bg-muted rounded-md">
-                          <Calendar className="w-4 h-4 text-muted-foreground" />
-                          <span>{format(new Date(request.originalDate), 'MMM d, yyyy')}</span>
+                  <div>
+                    <p className="text-xs text-muted-foreground mb-2">Schedule Change Request</p>
+                    <div className="flex items-center gap-3 text-sm">
+                      {request.originalDate ? (
+                        <>
+                          <div className="flex-1">
+                            <p className="text-xs text-muted-foreground mb-1">Change FROM:</p>
+                            <div className="flex items-center gap-2 px-3 py-2 bg-muted rounded-md">
+                              <Calendar className="w-4 h-4 text-muted-foreground" />
+                              <span>{format(new Date(request.originalDate), 'MMM d, yyyy')}</span>
+                            </div>
+                          </div>
+                          <ArrowRight className="w-5 h-5 text-muted-foreground mt-5" />
+                          <div className="flex-1">
+                            <p className="text-xs text-muted-foreground mb-1">Change TO:</p>
+                            <div className="flex items-center gap-2 px-3 py-2 bg-primary/10 rounded-md border border-primary/20">
+                              <Calendar className="w-4 h-4 text-primary" />
+                              <span className="font-medium">{format(new Date(request.newDate), 'MMM d, yyyy')}</span>
+                            </div>
+                          </div>
+                        </>
+                      ) : (
+                        <div className="flex-1">
+                          <p className="text-xs text-muted-foreground mb-1">Add New Office Day:</p>
+                          <div className="flex items-center gap-2 px-3 py-2 bg-primary/10 rounded-md border border-primary/20">
+                            <Calendar className="w-4 h-4 text-primary" />
+                            <span className="font-medium">{format(new Date(request.newDate), 'MMM d, yyyy')}</span>
+                          </div>
                         </div>
-                        <ArrowRight className="w-4 h-4 text-muted-foreground" />
-                        <div className="flex items-center gap-2 px-3 py-2 bg-primary/10 rounded-md">
-                          <Calendar className="w-4 h-4 text-primary" />
-                          <span className="font-medium">{format(new Date(request.newDate), 'MMM d, yyyy')}</span>
-                        </div>
-                      </>
-                    ) : (
-                      <div className="flex items-center gap-2 px-3 py-2 bg-primary/10 rounded-md">
-                        <Calendar className="w-4 h-4 text-primary" />
-                        <span className="font-medium">Add: {format(new Date(request.newDate), 'MMM d, yyyy')}</span>
-                      </div>
-                    )}
+                      )}
+                    </div>
                   </div>
 
                   {request.reason && (

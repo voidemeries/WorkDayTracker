@@ -10,8 +10,9 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Calendar } from "@/components/ui/calendar";
+import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
-import { ChevronLeft, ChevronRight, Calendar as CalendarIcon, Users, Plus } from "lucide-react";
+import { ChevronLeft, ChevronRight, Calendar as CalendarIcon, Users, Plus, UserPlus } from "lucide-react";
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, startOfWeek, endOfWeek, addMonths, subMonths } from "date-fns";
 import type { Room, RoomMember, OfficeSchedule, User, ChangeRequest } from "@shared/schema";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -25,9 +26,13 @@ export default function CalendarPage() {
   const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null);
   const [schedules, setSchedules] = useState<(OfficeSchedule & { user: User })[]>([]);
   const [requestDialogOpen, setRequestDialogOpen] = useState(false);
+  const [originalScheduleDate, setOriginalScheduleDate] = useState<Date | undefined>(undefined);
   const [newScheduleDate, setNewScheduleDate] = useState<Date | undefined>(undefined);
-  const [originalDate, setOriginalDate] = useState<string | null>(null);
   const [reason, setReason] = useState("");
+  const [assignDialogOpen, setAssignDialogOpen] = useState(false);
+  const [roomMembers, setRoomMembers] = useState<(RoomMember & { user: User })[]>([]);
+  const [selectedMembers, setSelectedMembers] = useState<string[]>([]);
+  const [assignDates, setAssignDates] = useState<Date[]>([]);
 
   useEffect(() => {
     if (!currentUser) return;
@@ -90,8 +95,75 @@ export default function CalendarPage() {
     return () => unsubscribe();
   }, [selectedRoomId]);
 
+  useEffect(() => {
+    if (!selectedRoomId) return;
+
+    const roomMembersRef = ref(database, 'roomMembers');
+    const unsubscribe = onValue(roomMembersRef, async (snapshot) => {
+      if (!snapshot.exists()) {
+        setRoomMembers([]);
+        return;
+      }
+
+      const members = snapshot.val();
+      const roomMembersList = await Promise.all(
+        Object.entries(members)
+          .filter(([_, member]: any) => member.roomId === selectedRoomId && member.status === 'active')
+          .map(async ([id, member]: any) => {
+            const userSnapshot = await get(ref(database, `users/${member.userId}`));
+            return { ...member, id, user: userSnapshot.val() };
+          })
+      );
+
+      setRoomMembers(roomMembersList);
+    });
+
+    return () => unsubscribe();
+  }, [selectedRoomId]);
+
+  const handleAssignSchedules = async () => {
+    if (!currentUser || !selectedRoomId || selectedMembers.length === 0 || assignDates.length === 0) return;
+
+    try {
+      const schedulesRef = ref(database, 'officeSchedules');
+      
+      for (const memberId of selectedMembers) {
+        const member = roomMembers.find(m => m.id === memberId);
+        if (!member) continue;
+
+        for (const date of assignDates) {
+          const newScheduleRef = push(schedulesRef);
+          const newSchedule: OfficeSchedule = {
+            id: newScheduleRef.key!,
+            roomId: selectedRoomId,
+            userId: member.userId,
+            date: format(date, 'yyyy-MM-dd'),
+            status: 'office',
+            createdAt: Date.now(),
+          };
+          await set(newScheduleRef, newSchedule);
+        }
+      }
+
+      toast({
+        title: "Schedules assigned",
+        description: `Assigned ${assignDates.length} date(s) to ${selectedMembers.length} member(s)`,
+      });
+
+      setAssignDialogOpen(false);
+      setSelectedMembers([]);
+      setAssignDates([]);
+    } catch (error) {
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "Could not assign schedules",
+      });
+    }
+  };
+
   const handleRequestChange = async () => {
-    if (!currentUser || !selectedRoomId || !newScheduleDate) return;
+    if (!currentUser || !selectedRoomId || !newScheduleDate || !originalScheduleDate) return;
 
     try {
       const requestsRef = ref(database, 'changeRequests');
@@ -101,7 +173,7 @@ export default function CalendarPage() {
         id: newRequestRef.key!,
         roomId: selectedRoomId,
         userId: currentUser.id,
-        originalDate: originalDate,
+        originalDate: originalScheduleDate ? format(originalScheduleDate, 'yyyy-MM-dd') : null,
         newDate: format(newScheduleDate, 'yyyy-MM-dd'),
         reason: reason.trim() || undefined,
         status: 'pending',
@@ -118,8 +190,8 @@ export default function CalendarPage() {
       });
 
       setRequestDialogOpen(false);
+      setOriginalScheduleDate(undefined);
       setNewScheduleDate(undefined);
-      setOriginalDate(null);
       setReason("");
     } catch (error) {
       toast({
@@ -148,27 +220,116 @@ export default function CalendarPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-4">
         <div>
           <h1 className="text-2xl font-semibold">Calendar</h1>
           <p className="text-sm text-muted-foreground mt-1">
             View and manage office schedules
           </p>
         </div>
-        {userRooms.length > 0 && (
-          <Select value={selectedRoomId || undefined} onValueChange={setSelectedRoomId}>
-            <SelectTrigger className="w-[200px]" data-testid="select-room">
-              <SelectValue placeholder="Select room" />
-            </SelectTrigger>
-            <SelectContent>
-              {userRooms.map((room) => (
-                <SelectItem key={room.id} value={room.id}>
-                  {room.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        )}
+        <div className="flex items-center gap-2">
+          {selectedRoom && selectedRoom.memberRole === 'admin' && (
+            <Dialog 
+              open={assignDialogOpen} 
+              onOpenChange={(open) => {
+                setAssignDialogOpen(open);
+                if (!open) {
+                  setSelectedMembers([]);
+                  setAssignDates([]);
+                }
+              }}
+            >
+              <DialogTrigger asChild>
+                <Button variant="default" data-testid="button-assign-team">
+                  <UserPlus className="w-4 h-4 mr-2" />
+                  Assign Team
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="max-w-2xl">
+                <DialogHeader>
+                  <DialogTitle>Assign Team to Office Dates</DialogTitle>
+                  <DialogDescription>
+                    Select team members and dates to assign them to the office
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-6 pt-4">
+                  <div className="space-y-3">
+                    <Label className="text-sm font-medium">Select Team Members</Label>
+                    <div className="border rounded-md p-4 max-h-48 overflow-y-auto space-y-2">
+                      {roomMembers.length === 0 ? (
+                        <p className="text-sm text-muted-foreground text-center py-4">
+                          No team members in this room
+                        </p>
+                      ) : (
+                        roomMembers.map((member) => (
+                          <div key={member.id} className="flex items-center gap-3">
+                            <Checkbox
+                              id={`member-${member.id}`}
+                              checked={selectedMembers.includes(member.id)}
+                              onCheckedChange={(checked) => {
+                                if (checked) {
+                                  setSelectedMembers([...selectedMembers, member.id]);
+                                } else {
+                                  setSelectedMembers(selectedMembers.filter(id => id !== member.id));
+                                }
+                              }}
+                              data-testid={`checkbox-member-${member.id}`}
+                            />
+                            <label htmlFor={`member-${member.id}`} className="flex-1 flex items-center gap-2 cursor-pointer">
+                              <Avatar className="w-6 h-6">
+                                <AvatarFallback className="text-xs">
+                                  {member.user?.name?.substring(0, 2).toUpperCase() || 'U'}
+                                </AvatarFallback>
+                              </Avatar>
+                              <span className="text-sm">{member.user?.name}</span>
+                              <Badge variant={member.role === 'admin' ? 'default' : 'secondary'} className="text-xs">
+                                {member.role}
+                              </Badge>
+                            </label>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                  <div className="space-y-3">
+                    <Label className="text-sm font-medium">
+                      Select Dates {assignDates.length > 0 && `(${assignDates.length} selected)`}
+                    </Label>
+                    <Calendar
+                      mode="multiple"
+                      selected={assignDates}
+                      onSelect={(dates) => setAssignDates(dates || [])}
+                      className="rounded-md border"
+                      data-testid="calendar-assign-dates"
+                    />
+                  </div>
+                  <Button 
+                    onClick={handleAssignSchedules}
+                    data-testid="button-submit-assign"
+                    className="w-full"
+                    disabled={selectedMembers.length === 0 || assignDates.length === 0}
+                  >
+                    Assign {selectedMembers.length} member(s) to {assignDates.length} date(s)
+                  </Button>
+                </div>
+              </DialogContent>
+            </Dialog>
+          )}
+          {userRooms.length > 0 && (
+            <Select value={selectedRoomId || undefined} onValueChange={setSelectedRoomId}>
+              <SelectTrigger className="w-[200px]" data-testid="select-room">
+                <SelectValue placeholder="Select room" />
+              </SelectTrigger>
+              <SelectContent>
+                {userRooms.map((room) => (
+                  <SelectItem key={room.id} value={room.id}>
+                    {room.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+        </div>
       </div>
 
       {userRooms.length === 0 ? (
@@ -295,7 +456,17 @@ export default function CalendarPage() {
                     </div>
                   )}
 
-                  <Dialog open={requestDialogOpen} onOpenChange={setRequestDialogOpen}>
+                  <Dialog 
+                    open={requestDialogOpen} 
+                    onOpenChange={(open) => {
+                      setRequestDialogOpen(open);
+                      if (!open) {
+                        setOriginalScheduleDate(undefined);
+                        setNewScheduleDate(undefined);
+                        setReason("");
+                      }
+                    }}
+                  >
                     <DialogTrigger asChild>
                       <Button 
                         className="w-full" 
@@ -303,38 +474,63 @@ export default function CalendarPage() {
                         data-testid="button-request-change"
                         onClick={() => {
                           if (userScheduleForDay) {
-                            setOriginalDate(userScheduleForDay.date);
+                            setOriginalScheduleDate(new Date(userScheduleForDay.date));
                           }
                         }}
                       >
                         <Plus className="w-4 h-4 mr-2" />
-                        {userScheduleForDay ? 'Change My Schedule' : 'Add Office Day'}
+                        Request Schedule Change
                       </Button>
                     </DialogTrigger>
-                    <DialogContent>
+                    <DialogContent className="max-w-2xl">
                       <DialogHeader>
                         <DialogTitle>Request Schedule Change</DialogTitle>
                         <DialogDescription>
-                          Submit a request to modify your office schedule
+                          Select the date you want to change and the new date you want to move to
                         </DialogDescription>
                       </DialogHeader>
-                      <div className="space-y-4 pt-4">
-                        {userScheduleForDay && (
-                          <div className="p-3 bg-muted rounded-md">
-                            <p className="text-xs text-muted-foreground mb-1">Current schedule</p>
-                            <p className="text-sm font-medium">
-                              {format(new Date(userScheduleForDay.date), 'MMMM d, yyyy')} - {userScheduleForDay.status === 'office' ? 'In Office' : 'Remote'}
+                      <div className="space-y-6 pt-4">
+                        <div className="grid gap-4 md:grid-cols-2">
+                          <div className="space-y-2">
+                            <Label className="text-sm font-medium">
+                              Date to Change FROM {originalScheduleDate && '✓'}
+                            </Label>
+                            <p className="text-xs text-muted-foreground mb-2">
+                              Select the current office date you want to change
                             </p>
+                            <Calendar
+                              mode="single"
+                              selected={originalScheduleDate}
+                              onSelect={setOriginalScheduleDate}
+                              className="rounded-md border"
+                              data-testid="calendar-original-date"
+                            />
+                            {originalScheduleDate && (
+                              <p className="text-xs text-center text-muted-foreground mt-2">
+                                Selected: {format(originalScheduleDate, 'MMM d, yyyy')}
+                              </p>
+                            )}
                           </div>
-                        )}
-                        <div className="space-y-2">
-                          <Label>New Date</Label>
-                          <Calendar
-                            mode="single"
-                            selected={newScheduleDate}
-                            onSelect={setNewScheduleDate}
-                            className="rounded-md border"
-                          />
+                          <div className="space-y-2">
+                            <Label className="text-sm font-medium">
+                              Date to Change TO {newScheduleDate && '✓'}
+                            </Label>
+                            <p className="text-xs text-muted-foreground mb-2">
+                              Select the new date you want to work from office
+                            </p>
+                            <Calendar
+                              mode="single"
+                              selected={newScheduleDate}
+                              onSelect={setNewScheduleDate}
+                              className="rounded-md border"
+                              data-testid="calendar-new-date"
+                            />
+                            {newScheduleDate && (
+                              <p className="text-xs text-center text-muted-foreground mt-2">
+                                Selected: {format(newScheduleDate, 'MMM d, yyyy')}
+                              </p>
+                            )}
+                          </div>
                         </div>
                         <div className="space-y-2">
                           <Label htmlFor="reason">Reason (optional)</Label>
@@ -351,10 +547,15 @@ export default function CalendarPage() {
                           onClick={handleRequestChange}
                           data-testid="button-submit-request"
                           className="w-full"
-                          disabled={!newScheduleDate}
+                          disabled={!newScheduleDate || !originalScheduleDate}
                         >
-                          Submit Request
+                          Submit Change Request
                         </Button>
+                        {(!originalScheduleDate || !newScheduleDate) && (
+                          <p className="text-xs text-center text-muted-foreground">
+                            Please select both dates to submit your request
+                          </p>
+                        )}
                       </div>
                     </DialogContent>
                   </Dialog>
