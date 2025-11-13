@@ -25,10 +25,7 @@
     },
     "changeRequests": {
       ".read": "auth != null",
-      "$requestId": {
-        ".write": "(!data.exists() && newData.child('userId').val() === auth.uid) || (data.exists() && (data.child('userId').val() === auth.uid || newData.child('status').val() != 'pending'))",
-        ".validate": "newData.hasChildren(['id', 'roomId', 'userId', 'newDate', 'status', 'createdAt'])"
-      }
+      ".write": "auth != null"
     },
     "notifications": {
       ".read": "auth != null",
