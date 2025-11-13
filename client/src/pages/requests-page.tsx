@@ -356,7 +356,14 @@ export default function RequestsPage() {
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div>
-                    <p className="text-xs text-muted-foreground mb-2">Schedule Change Request</p>
+                    <p className="text-xs text-muted-foreground mb-2">
+                      {request.newDate === null 
+                        ? 'Delete Office Day Request' 
+                        : request.originalDate 
+                          ? 'Schedule Change Request' 
+                          : 'New Working Day Request'
+                      }
+                    </p>
                     <div className="flex items-center gap-3 text-sm">
                       {request.newDate === null ? (
                         <div className="flex-1">
@@ -386,7 +393,7 @@ export default function RequestsPage() {
                         </>
                       ) : (
                         <div className="flex-1">
-                          <p className="text-xs text-muted-foreground mb-1">Add New Office Day:</p>
+                          <p className="text-xs text-muted-foreground mb-1">Requested Office Day:</p>
                           <div className="flex items-center gap-2 px-3 py-2 bg-primary/10 rounded-md border border-primary/20">
                             <Calendar className="w-4 h-4 text-primary" />
                             <span className="font-medium">{format(parseISO(request.newDate), 'MMM d, yyyy')}</span>
