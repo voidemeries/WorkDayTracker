@@ -72,55 +72,77 @@ The application uses the following data structure in Firebase Realtime Database:
 
 ## Firebase Realtime Database Security Rules
 
-**IMPORTANT**: You must configure these security rules in your Firebase Console under Realtime Database > Rules:
+**CRITICAL**: You must configure these security rules in your Firebase Console under Realtime Database > Rules.
+
+These rules enforce proper authorization and prevent unauthorized access:
 
 ```json
 {
   "rules": {
     "users": {
+      ".read": "auth != null",
       "$uid": {
-        ".read": "auth != null",
         ".write": "$uid === auth.uid"
       }
     },
     "rooms": {
+      ".read": "auth != null",
       "$roomId": {
-        ".read": "auth != null",
-        ".write": "auth != null && (!data.exists() || data.child('createdBy').val() === auth.uid)"
+        ".write": "!data.exists() || data.child('createdBy').val() === auth.uid",
+        ".validate": "newData.hasChildren(['id', 'name', 'createdBy', 'createdAt', 'inviteCode'])"
       }
     },
     "roomMembers": {
+      ".read": "auth != null",
       "$memberId": {
-        ".read": "auth != null",
-        ".write": "auth != null && (
-          !data.exists() || 
-          data.child('userId').val() === auth.uid ||
-          root.child('roomMembers').orderByChild('roomId').equalTo(data.child('roomId').val()).val() != null
-        )"
+        ".write": "(
+          !data.exists() && newData.child('userId').val() === auth.uid
+        ) || (
+          data.exists() && (
+            data.child('userId').val() === auth.uid ||
+            root.child('roomMembers').orderByChild('roomId').equalTo(data.child('roomId').val()).orderByChild('role').equalTo('admin').orderByChild('userId').equalTo(auth.uid).val() != null
+          )
+        )",
+        ".validate": "newData.hasChildren(['roomId', 'userId', 'role', 'status'])"
       }
     },
     "officeSchedules": {
+      ".read": "auth != null",
       "$scheduleId": {
-        ".read": "auth != null",
-        ".write": "auth != null"
+        ".write": "(
+          !data.exists() && newData.child('userId').val() === auth.uid
+        ) || (
+          data.exists() && data.child('userId').val() === auth.uid
+        )",
+        ".validate": "newData.hasChildren(['roomId', 'userId', 'date', 'status'])"
       }
     },
     "changeRequests": {
+      ".read": "auth != null",
       "$requestId": {
-        ".read": "auth != null",
-        ".write": "auth != null"
+        ".write": "(
+          !data.exists() && newData.child('userId').val() === auth.uid
+        ) || (
+          data.exists() && data.child('userId').val() === auth.uid
+        ) || (
+          data.exists() && newData.child('status').val() != 'pending'
+        )",
+        ".validate": "newData.hasChildren(['roomId', 'userId', 'newDate', 'status'])"
       }
     }
   }
 }
 ```
 
-These rules ensure:
-- Users can only modify their own user data
-- Authenticated users can read all rooms
-- Only room creators can modify room data
-- Room members and admins can manage memberships
-- All authenticated users can create and manage schedules and requests
+**Security Features:**
+- ✅ Users can only create/modify their own data
+- ✅ Only room creators can modify room settings
+- ✅ Users can join rooms (pending status) but admins must approve
+- ✅ Room admins can approve/reject members
+- ✅ Users can only create schedules for themselves
+- ✅ Users can create change requests for themselves
+- ✅ Admins can resolve change requests by updating status
+- ✅ All writes are validated to ensure required fields exist
 
 ## Setting Up Firebase Realtime Database
 
@@ -129,8 +151,14 @@ These rules ensure:
 3. Navigate to "Realtime Database" in the left sidebar
 4. Click "Create Database"
 5. Choose a location (preferably close to your users)
+   - US: `us-central1`
+   - Europe: `europe-west1`
+   - Asia: `asia-southeast1`
 6. Start in **test mode** initially, then apply the security rules above
 7. Click "Enable"
+8. **Important**: After creating the database, copy the database URL shown at the top
+   - It will look like: `https://your-project-default-rtdb.REGION.firebasedatabase.app`
+   - If the app shows a region warning, update `client/src/lib/firebase.ts` line 14 with the correct URL
 
 ## Applying Security Rules
 

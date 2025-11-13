@@ -18,33 +18,41 @@ export default function DashboardPage() {
   const [userRooms, setUserRooms] = useState<(Room & { memberRole: string })[]>([]);
   const [upcomingSchedules, setUpcomingSchedules] = useState<(OfficeSchedule & { user: User, room: Room })[]>([]);
   const [pendingRequests, setPendingRequests] = useState<ChangeRequest[]>([]);
+  const [loadingRooms, setLoadingRooms] = useState(true);
+  const [loadingSchedules, setLoadingSchedules] = useState(true);
+  const [loadingRequests, setLoadingRequests] = useState(true);
 
   useEffect(() => {
     if (!currentUser) return;
 
     const roomMembersRef = ref(database, 'roomMembers');
     const unsubscribe = onValue(roomMembersRef, async (snapshot) => {
-      if (!snapshot.exists()) {
-        setUserRooms([]);
-        return;
+      try {
+        if (!snapshot.exists()) {
+          setUserRooms([]);
+          setLoadingRooms(false);
+          return;
+        }
+
+        const members = snapshot.val();
+        const userMemberEntries = Object.entries(members).filter(
+          ([_, member]: any) => member.userId === currentUser.id && member.status === 'active'
+        );
+
+        const roomsData = await Promise.all(
+          userMemberEntries.map(async ([_, member]: any) => {
+            const roomSnapshot = await get(ref(database, `rooms/${member.roomId}`));
+            if (roomSnapshot.exists()) {
+              return { ...roomSnapshot.val(), memberRole: member.role };
+            }
+            return null;
+          })
+        );
+
+        setUserRooms(roomsData.filter(Boolean));
+      } finally {
+        setLoadingRooms(false);
       }
-
-      const members = snapshot.val();
-      const userMemberEntries = Object.entries(members).filter(
-        ([_, member]: any) => member.userId === currentUser.id && member.status === 'active'
-      );
-
-      const roomsData = await Promise.all(
-        userMemberEntries.map(async ([_, member]: any) => {
-          const roomSnapshot = await get(ref(database, `rooms/${member.roomId}`));
-          if (roomSnapshot.exists()) {
-            return { ...roomSnapshot.val(), memberRole: member.role };
-          }
-          return null;
-        })
-      );
-
-      setUserRooms(roomsData.filter(Boolean));
     });
 
     return () => unsubscribe();
@@ -55,40 +63,45 @@ export default function DashboardPage() {
 
     const schedulesRef = ref(database, 'officeSchedules');
     const unsubscribe = onValue(schedulesRef, async (snapshot) => {
-      if (!snapshot.exists()) {
-        setUpcomingSchedules([]);
-        return;
+      try {
+        if (!snapshot.exists()) {
+          setUpcomingSchedules([]);
+          setLoadingSchedules(false);
+          return;
+        }
+
+        const schedules = snapshot.val();
+        const today = startOfDay(new Date()).getTime();
+        const next7Days = addDays(today, 7).getTime();
+
+        const upcoming = await Promise.all(
+          Object.entries(schedules)
+            .filter(([_, schedule]: any) => {
+              const scheduleDate = new Date(schedule.date).getTime();
+              return scheduleDate >= today && 
+                     scheduleDate <= next7Days && 
+                     userRooms.some(r => r.id === schedule.roomId);
+            })
+            .map(async ([_, schedule]: any) => {
+              const [userSnap, roomSnap] = await Promise.all([
+                get(ref(database, `users/${schedule.userId}`)),
+                get(ref(database, `rooms/${schedule.roomId}`))
+              ]);
+              
+              return {
+                ...schedule,
+                user: userSnap.val(),
+                room: roomSnap.val()
+              };
+            })
+        );
+
+        setUpcomingSchedules(upcoming.sort((a, b) => 
+          new Date(a.date).getTime() - new Date(b.date).getTime()
+        ));
+      } finally {
+        setLoadingSchedules(false);
       }
-
-      const schedules = snapshot.val();
-      const today = startOfDay(new Date()).getTime();
-      const next7Days = addDays(today, 7).getTime();
-
-      const upcoming = await Promise.all(
-        Object.entries(schedules)
-          .filter(([_, schedule]: any) => {
-            const scheduleDate = new Date(schedule.date).getTime();
-            return scheduleDate >= today && 
-                   scheduleDate <= next7Days && 
-                   userRooms.some(r => r.id === schedule.roomId);
-          })
-          .map(async ([_, schedule]: any) => {
-            const [userSnap, roomSnap] = await Promise.all([
-              get(ref(database, `users/${schedule.userId}`)),
-              get(ref(database, `rooms/${schedule.roomId}`))
-            ]);
-            
-            return {
-              ...schedule,
-              user: userSnap.val(),
-              room: roomSnap.val()
-            };
-          })
-      );
-
-      setUpcomingSchedules(upcoming.sort((a, b) => 
-        new Date(a.date).getTime() - new Date(b.date).getTime()
-      ));
     });
 
     return () => unsubscribe();
@@ -105,17 +118,22 @@ export default function DashboardPage() {
 
     const requestsRef = ref(database, 'changeRequests');
     const unsubscribe = onValue(requestsRef, (snapshot) => {
-      if (!snapshot.exists()) {
-        setPendingRequests([]);
-        return;
+      try {
+        if (!snapshot.exists()) {
+          setPendingRequests([]);
+          setLoadingRequests(false);
+          return;
+        }
+
+        const requests = snapshot.val();
+        const pending = Object.values(requests).filter(
+          (req: any) => req.status === 'pending' && adminRoomIds.includes(req.roomId)
+        );
+
+        setPendingRequests(pending as ChangeRequest[]);
+      } finally {
+        setLoadingRequests(false);
       }
-
-      const requests = snapshot.val();
-      const pending = Object.values(requests).filter(
-        (req: any) => req.status === 'pending' && adminRoomIds.includes(req.roomId)
-      );
-
-      setPendingRequests(pending as ChangeRequest[]);
     });
 
     return () => unsubscribe();
@@ -125,6 +143,22 @@ export default function DashboardPage() {
 
   const thisWeekSchedules = upcomingSchedules.filter(s => s.userId === currentUser.id);
   const adminRooms = userRooms.filter(r => r.memberRole === 'admin');
+
+  if (loadingRooms) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <Skeleton className="h-8 w-48" />
+          <Skeleton className="h-4 w-64 mt-2" />
+        </div>
+        <div className="grid gap-6 md:grid-cols-3">
+          <Skeleton className="h-32" />
+          <Skeleton className="h-32" />
+          <Skeleton className="h-32" />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">

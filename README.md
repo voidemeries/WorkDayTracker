@@ -39,35 +39,36 @@ After creating the database:
 {
   "rules": {
     "users": {
+      ".read": "auth != null",
       "$uid": {
-        ".read": "auth != null",
         ".write": "$uid === auth.uid"
       }
     },
     "rooms": {
+      ".read": "auth != null",
       "$roomId": {
-        ".read": "auth != null",
-        ".write": "auth != null && (!data.exists() || data.child('createdBy').val() === auth.uid)"
+        ".write": "!data.exists() || data.child('createdBy').val() === auth.uid",
+        ".validate": "newData.hasChildren(['id', 'name', 'createdBy', 'createdAt', 'inviteCode'])"
       }
     },
     "roomMembers": {
       ".read": "auth != null",
-      ".write": "auth != null",
       "$memberId": {
+        ".write": "(!data.exists() && newData.child('userId').val() === auth.uid) || (data.exists() && data.child('userId').val() === auth.uid)",
         ".validate": "newData.hasChildren(['roomId', 'userId', 'role', 'status'])"
       }
     },
     "officeSchedules": {
       ".read": "auth != null",
-      ".write": "auth != null",
       "$scheduleId": {
+        ".write": "(!data.exists() && newData.child('userId').val() === auth.uid) || (data.exists() && data.child('userId').val() === auth.uid)",
         ".validate": "newData.hasChildren(['roomId', 'userId', 'date', 'status'])"
       }
     },
     "changeRequests": {
       ".read": "auth != null",
-      ".write": "auth != null",
       "$requestId": {
+        ".write": "(!data.exists() && newData.child('userId').val() === auth.uid) || (data.exists() && (data.child('userId').val() === auth.uid || newData.child('status').val() != 'pending'))",
         ".validate": "newData.hasChildren(['roomId', 'userId', 'newDate', 'status'])"
       }
     }
